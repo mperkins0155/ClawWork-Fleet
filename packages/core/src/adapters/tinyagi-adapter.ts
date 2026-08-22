@@ -35,11 +35,10 @@ export interface TinyAgiAdapterConfig {
 }
 
 interface TinyAgiAgent {
-  id: string;
   name?: string;
-  team?: string;
-  status?: string;
-  lastActive?: number;
+  provider?: string;
+  model?: string;
+  working_directory?: string;
 }
 
 interface TinyAgiTeam {
@@ -48,13 +47,13 @@ interface TinyAgiTeam {
   leader_agent: string;
 }
 
+/** Verified against live GET /api/chatroom/:teamId response (2026-08-22). */
 interface TinyAgiChatMessage {
-  id?: string;
-  sender: string;
-  channel?: string;
+  id: number;
+  team_id: string;
+  from_agent: string;
   message: string;
-  timestamp?: number;
-  messageId?: string;
+  created_at: number;
 }
 
 const DEFAULT_POLL_MS = 5000;
@@ -110,16 +109,16 @@ export function createTinyAgiAdapter(config: TinyAgiAdapterConfig): RuntimeAdapt
       const lastSeen = lastSeenPerTeam.get(teamId) ?? 0;
       let maxTs = lastSeen;
       for (const m of messages) {
-        const ts = m.timestamp ?? 0;
+        const ts = m.created_at ?? 0;
         if (ts <= lastSeen) continue;
         maxTs = Math.max(maxTs, ts);
         emit({
           type: 'message',
           runtimeId,
           payload: {
-            id: m.messageId ?? m.id ?? `${teamId}-${ts}`,
+            id: String(m.id),
             runtimeId,
-            sender: m.sender,
+            sender: m.from_agent,
             recipient: `channel:${teamId}`,
             channel: teamId,
             body: m.message,
@@ -167,14 +166,23 @@ export function createTinyAgiAdapter(config: TinyAgiAdapterConfig): RuntimeAdapt
 
     async listAgents(): Promise<RuntimeAgentRef[]> {
       const agents = await apiFetch<Record<string, TinyAgiAgent>>('/api/agents');
-      const now = Date.now();
-      return Object.entries(agents).map(([id, a]) => ({
-        id,
-        name: a.name ?? id,
-        role: a.team,
-        online: a.lastActive ? now - a.lastActive < 5 * 60_000 : a.status === 'running',
-        lastSeenAt: a.lastActive ? new Date(a.lastActive).toISOString() : undefined,
-      }));
+      // TinyAGI's /api/agents has no per-agent online/lastActive signal (it's
+      // config, not runtime state). /api/status has a heartbeat.lastSent map
+      // keyed by agent id -- use that as the liveness source instead.
+      const status = await apiFetch<{ heartbeat?: { lastSent?: Record<string, number> } }>('/api/status').catch(
+        () => ({}) as { heartbeat?: { lastSent?: Record<string, number> } },
+      );
+      const lastSent = status.heartbeat?.lastSent ?? {};
+      const now = Date.now() / 1000; // lastSent values are unix seconds
+      return Object.entries(agents).map(([id, a]) => {
+        const sent = lastSent[id];
+        return {
+          id,
+          name: a.name ?? id,
+          online: sent != null && now - sent < 2 * 3600, // within 2x default 1h heartbeat interval
+          lastSeenAt: sent != null ? new Date(sent * 1000).toISOString() : undefined,
+        };
+      });
     },
 
     async sendMessage(params: SendMessageParams) {
@@ -192,6 +200,9 @@ export function createTinyAgiAdapter(config: TinyAgiAdapterConfig): RuntimeAdapt
         if (teamIds.length === 0) {
           return { ok: false, error: 'no TinyAGI team resolved for this recipient' };
         }
+        // Server route (packages/server/src/routes/chatroom.ts) hardcodes
+        // sender='user' server-side via postToChatRoom(teamId, 'user', ...) --
+        // body only accepts { message }, no sender override.
         await Promise.all(
           teamIds.map((teamId) =>
             apiFetch(`/api/chatroom/${teamId}`, {
@@ -217,13 +228,13 @@ export function createTinyAgiAdapter(config: TinyAgiAdapterConfig): RuntimeAdapt
           );
           for (const m of msgs) {
             all.push({
-              id: m.messageId ?? m.id ?? `${t}-${m.timestamp ?? 0}`,
+              id: String(m.id),
               runtimeId,
-              sender: m.sender,
+              sender: m.from_agent,
               recipient: `channel:${t}`,
               channel: t,
               body: m.message,
-              createdAt: new Date(m.timestamp ?? Date.now()).toISOString(),
+              createdAt: new Date(m.created_at ?? Date.now()).toISOString(),
             });
           }
         }
@@ -232,13 +243,13 @@ export function createTinyAgiAdapter(config: TinyAgiAdapterConfig): RuntimeAdapt
       const messages = await apiFetch<TinyAgiChatMessage[]>(`/api/chatroom/${teamId}?limit=${opts?.limit ?? 100}`);
       return messages.map(
         (m): RuntimeMessage => ({
-          id: m.messageId ?? m.id ?? `${teamId}-${m.timestamp ?? 0}`,
+          id: String(m.id),
           runtimeId,
-          sender: m.sender,
+          sender: m.from_agent,
           recipient: `channel:${teamId}`,
           channel: teamId,
           body: m.message,
-          createdAt: new Date(m.timestamp ?? Date.now()).toISOString(),
+          createdAt: new Date(m.created_at ?? Date.now()).toISOString(),
         }),
       );
     },
