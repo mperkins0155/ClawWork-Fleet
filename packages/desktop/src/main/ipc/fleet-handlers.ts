@@ -10,7 +10,12 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { desc, eq } from 'drizzle-orm';
 import { getDb, isDbReady } from '../db/index.js';
 import { fleetMessages, fleetRuntimes, infraHosts } from '../db/schema.js';
-import { createAgentNetAdapter } from '@clawwork/core';
+import {
+  createAgentNetAdapter,
+  createSwarmClawAdapter,
+  createTinyAgiAdapter,
+  createHermesAdapter,
+} from '@clawwork/core';
 import type { RuntimeAdapterPort, FleetMessage } from '@clawwork/core';
 import {
   registerHost as registerInfraHost,
@@ -40,17 +45,36 @@ function buildAdapter(row: {
   baseUrl: string;
   apiKeyEncrypted: string | null;
 }): RuntimeAdapterPort | null {
+  // NOTE: api key storage should move to Electron's safeStorage before
+  // production use; plaintext column is a placeholder for scaffolding.
   switch (row.kind) {
     case 'agentnet':
-      // NOTE: api key storage should move to Electron's safeStorage before
-      // production use; plaintext column is a placeholder for scaffolding.
       return createAgentNetAdapter({
         runtimeId: row.runtimeId,
         label: row.label,
         baseUrl: row.baseUrl,
         apiKey: row.apiKeyEncrypted ?? '',
       });
-    // TODO: 'swarmclaw' | 'tinyagi' | 'hermes' adapters — Phase 3.
+    case 'swarmclaw':
+      return createSwarmClawAdapter({
+        runtimeId: row.runtimeId,
+        label: row.label,
+        baseUrl: row.baseUrl,
+        authToken: row.apiKeyEncrypted || undefined,
+      });
+    case 'tinyagi':
+      return createTinyAgiAdapter({
+        runtimeId: row.runtimeId,
+        label: row.label,
+        baseUrl: row.baseUrl,
+      });
+    case 'hermes':
+      return createHermesAdapter({
+        runtimeId: row.runtimeId,
+        label: row.label,
+        baseUrl: row.baseUrl,
+        apiKey: row.apiKeyEncrypted ?? '',
+      });
     default:
       console.warn(`[fleet-handlers] unknown runtime kind "${row.kind}", skipping`);
       return null;
@@ -70,10 +94,7 @@ export function registerFleetHandlers(): void {
 
   ipcMain.handle(
     'fleet:runtime-add',
-    async (
-      _event,
-      params: { runtimeId: string; kind: string; label: string; baseUrl: string; apiKey?: string },
-    ) => {
+    async (_event, params: { runtimeId: string; kind: string; label: string; baseUrl: string; apiKey?: string }) => {
       if (!isDbReady()) return ipcError(new Error('database not ready'));
       try {
         const db = getDb();

@@ -141,5 +141,14 @@ export type {
 export { createAgentNetAdapter } from './adapters/agentnet-adapter.js';
 export type { AgentNetAdapterConfig } from './adapters/agentnet-adapter.js';
 
+export { createSwarmClawAdapter } from './adapters/swarmclaw-adapter.js';
+export type { SwarmClawAdapterConfig } from './adapters/swarmclaw-adapter.js';
+
+export { createTinyAgiAdapter } from './adapters/tinyagi-adapter.js';
+export type { TinyAgiAdapterConfig } from './adapters/tinyagi-adapter.js';
+
+export { createHermesAdapter } from './adapters/hermes-adapter.js';
+export type { HermesAdapterConfig } from './adapters/hermes-adapter.js';
+
 export { createFleetRoomStore } from './stores/fleet-room-store.js';
 export type { FleetPerformer, FleetMessage, FleetRoomStoreDeps, FleetRoomState } from './stores/fleet-room-store.js';
