@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import InfraMonitor from './InfraMonitor';
+import AddRuntimeDialog, { type AddRuntimeParams } from './AddRuntimeDialog';
 
 function AgentPill({
   online,
@@ -78,7 +79,7 @@ export default function FleetPanel() {
 
   const [recipient, setRecipient] = useState('all');
   const [draft, setDraft] = useState('');
-  const [addingRuntime, setAddingRuntime] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [infraOpen, setInfraOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -99,18 +100,12 @@ export default function FleetPanel() {
     setDraft('');
   }, [draft, recipient, sendMessage]);
 
-  const handleAddRuntime = useCallback(() => {
-    // Minimal inline flow for the scaffold; a proper dialog (matching
-    // TeamBuilderDialog patterns) is Phase 2 UI polish.
-    const runtimeId = window.prompt('Runtime id (e.g. agentnet-vps-ovh):');
-    if (!runtimeId) return;
-    const label = window.prompt('Display label:', runtimeId) ?? runtimeId;
-    const baseUrl = window.prompt('Base URL (e.g. https://vps-ovh.tail4f4e50.ts.net:8788):');
-    if (!baseUrl) return;
-    const apiKey = window.prompt('API key (X-API-Key for this adapter identity):') ?? '';
-    setAddingRuntime(true);
-    addRuntime({ runtimeId, kind: 'agentnet', label, baseUrl, apiKey }).finally(() => setAddingRuntime(false));
-  }, [addRuntime]);
+  const handleAddRuntimeSubmit = useCallback(
+    async (params: AddRuntimeParams) => {
+      await addRuntime(params);
+    },
+    [addRuntime],
+  );
 
   return (
     <div className="flex flex-col h-full">
@@ -129,8 +124,7 @@ export default function FleetPanel() {
             <Button
               size="icon-sm"
               variant="ghost"
-              onClick={handleAddRuntime}
-              disabled={addingRuntime}
+              onClick={() => setDialogOpen(true)}
               aria-label={t('fleet.addRuntime', 'Add runtime')}
             >
               <Plus size={16} />
@@ -193,7 +187,7 @@ export default function FleetPanel() {
                     'Add a runtime (AgentNet, SwarmClaw, TinyAGI, Hermes) to talk to your agents from one place.',
                   )}
                   action={
-                    <Button size="sm" onClick={handleAddRuntime}>
+                    <Button size="sm" onClick={() => setDialogOpen(true)}>
                       {t('fleet.addRuntime', 'Add runtime')}
                     </Button>
                   }
@@ -245,6 +239,8 @@ export default function FleetPanel() {
           </div>
         )}
       </div>
+
+      <AddRuntimeDialog open={dialogOpen} onOpenChange={setDialogOpen} onSubmit={handleAddRuntimeSubmit} />
     </div>
   );
 }
