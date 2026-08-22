@@ -48,7 +48,13 @@ interface FleetStoreState {
   hydrate: () => Promise<void>;
   refreshAgents: () => Promise<void>;
   sendMessage: (recipient: string, body: string, channel?: string) => Promise<void>;
-  addRuntime: (params: { runtimeId: string; kind: string; label: string; baseUrl: string; apiKey?: string }) => Promise<void>;
+  addRuntime: (params: {
+    runtimeId: string;
+    kind: string;
+    label: string;
+    baseUrl: string;
+    apiKey?: string;
+  }) => Promise<void>;
   removeRuntime: (runtimeId: string) => Promise<void>;
 }
 
@@ -70,9 +76,9 @@ export const useFleetStore = create<FleetStoreState>((set, get) => ({
         window.clawwork.fleetMessagesHistory(500),
       ]);
       set({
-        runtimes: runtimesRes.ok ? ((runtimesRes.result as FleetRuntimeConfig[]) ?? []) : [],
-        agents: agentsRes.ok ? ((agentsRes.result as FleetAgent[]) ?? []) : [],
-        messages: historyRes.ok ? ((historyRes.result as FleetMessage[]) ?? []) : [],
+        runtimes: runtimesRes.ok ? ((runtimesRes.result as unknown as FleetRuntimeConfig[]) ?? []) : [],
+        agents: agentsRes.ok ? ((agentsRes.result as unknown as FleetAgent[]) ?? []) : [],
+        messages: historyRes.ok ? ((historyRes.result as unknown as FleetMessage[]) ?? []) : [],
         loading: false,
       });
 
@@ -96,7 +102,7 @@ export const useFleetStore = create<FleetStoreState>((set, get) => ({
 
   refreshAgents: async () => {
     const res = await window.clawwork.fleetListAgents();
-    if (res.ok) set({ agents: (res.result as FleetAgent[]) ?? [] });
+    if (res.ok) set({ agents: (res.result as unknown as FleetAgent[]) ?? [] });
   },
 
   sendMessage: async (recipient, body, channel) => {
@@ -121,7 +127,10 @@ export const useFleetStore = create<FleetStoreState>((set, get) => ({
     const res = await window.clawwork.fleetAddRuntime(params);
     if (res.ok) {
       set((s) => ({
-        runtimes: [...s.runtimes, { runtimeId: params.runtimeId, kind: params.kind, label: params.label, baseUrl: params.baseUrl }],
+        runtimes: [
+          ...s.runtimes,
+          { runtimeId: params.runtimeId, kind: params.kind, label: params.label, baseUrl: params.baseUrl },
+        ],
       }));
       await get().refreshAgents();
     } else {

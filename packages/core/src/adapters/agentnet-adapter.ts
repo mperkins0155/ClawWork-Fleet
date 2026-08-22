@@ -12,7 +12,13 @@
  * onto RuntimeAdapterPort without translation loss.
  */
 
-import type { RuntimeAdapterPort, RuntimeAgentRef, RuntimeMessage, RuntimeEvent, SendMessageParams } from '../ports/runtime-adapter.js';
+import type {
+  RuntimeAdapterPort,
+  RuntimeAgentRef,
+  RuntimeMessage,
+  RuntimeEvent,
+  SendMessageParams,
+} from '../ports/runtime-adapter.js';
 
 export interface AgentNetAdapterConfig {
   runtimeId: string;
@@ -87,11 +93,12 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
           runtimeId,
           payload: {
             id: String(m.id),
+            runtimeId,
             sender: m.sender,
             recipient: m.channel ? `channel:${m.channel}` : m.recipient,
             body: m.body,
             createdAt: new Date(m.created_at * 1000).toISOString(),
-          } satisfies RuntimeMessage,
+          } satisfies RuntimeMessage as unknown as Record<string, unknown>,
         });
       }
     } catch (err) {

@@ -92,12 +92,12 @@ export function createFleetRoomStore(deps: FleetRoomStoreDeps = {}) {
       const unsub = adapter.onEvent((event) => {
         if (event.type === 'message') {
           const msg = event.payload as unknown as RuntimeMessage;
+          const next: FleetMessage = { ...msg, fromUser: false };
           set((s) => {
-            const next: FleetMessage = { ...msg, fromUser: false };
             const messages = [...s.messages, next].slice(-MAX_MESSAGES_IN_MEMORY);
             return { messages };
           });
-          deps.persistFleetMessage?.({ ...(event.payload as RuntimeMessage), fromUser: false }).catch((err) => {
+          deps.persistFleetMessage?.(next).catch((err) => {
             console.warn('[fleet-room-store] persistFleetMessage failed:', err);
           });
         } else if (event.type === 'agent-joined' || event.type === 'agent-status' || event.type === 'agent-left') {
