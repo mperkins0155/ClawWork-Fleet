@@ -113,3 +113,33 @@ export {
 } from './services/team-parser.js';
 export { installTeam } from './services/team-installer.js';
 export type { InstallerDeps } from './services/team-installer.js';
+
+// --- Fleet extension (Cobalt Super Hub) ---
+// See docs/SUPER_DASHBOARD_PLAN.md (cobalt-fleet repo) for the full design.
+
+export type {
+  RuntimeKind,
+  RuntimeAgentRef,
+  RuntimeMessage,
+  SendMessageParams,
+  RuntimeEvent,
+  RuntimeAdapterPort,
+} from './ports/runtime-adapter.js';
+
+export type {
+  ContainerState,
+  ContainerStatus,
+  TailscalePeer,
+  TailscaleStatus,
+  VpsResourceSnapshot,
+  SystemdUnitState,
+  SystemdUnitStatus,
+  InfraSnapshot,
+  InfraMonitorPort,
+} from './ports/infra-monitor.js';
+
+export { createAgentNetAdapter } from './adapters/agentnet-adapter.js';
+export type { AgentNetAdapterConfig } from './adapters/agentnet-adapter.js';
+
+export { createFleetRoomStore } from './stores/fleet-room-store.js';
+export type { FleetPerformer, FleetMessage, FleetRoomStoreDeps, FleetRoomState } from './stores/fleet-room-store.js';
