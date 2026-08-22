@@ -60,7 +60,7 @@ function buildAdapter(row: {
         runtimeId: row.runtimeId,
         label: row.label,
         baseUrl: row.baseUrl,
-        authToken: row.apiKeyEncrypted || undefined,
+        accessKey: row.apiKeyEncrypted ?? '',
       });
     case 'tinyagi':
       return createTinyAgiAdapter({
