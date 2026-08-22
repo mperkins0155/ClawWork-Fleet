@@ -388,8 +388,21 @@ function buildApi(): ClawWorkAPI {
       ipcRenderer.invoke('fleet:send-message', params),
     fleetMessagesHistory: (limit?: number) => ipcRenderer.invoke('fleet:messages-history', { limit }),
     fleetListInfraHosts: () => ipcRenderer.invoke('fleet:infra-hosts-list'),
+    fleetAddInfraHost: (params: { hostId: string; label: string; systemdUnits?: string[] }) =>
+      ipcRenderer.invoke('fleet:infra-host-add', params),
+    fleetRemoveInfraHost: (hostId: string) => ipcRenderer.invoke('fleet:infra-host-remove', { hostId }),
     fleetInfraSnapshot: (hostId: string) => ipcRenderer.invoke('fleet:infra-snapshot', { hostId }),
-    onFleetEvent: (callback: (event: { type: string; runtimeId: string; payload: Record<string, unknown> }) => void) => {
+    onFleetInfraSnapshot: (callback: (snapshot: Record<string, unknown>) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: Record<string, unknown>): void =>
+        callback(snapshot);
+      ipcRenderer.on('fleet:infra-snapshot', listener);
+      return () => {
+        ipcRenderer.removeListener('fleet:infra-snapshot', listener);
+      };
+    },
+    onFleetEvent: (
+      callback: (event: { type: string; runtimeId: string; payload: Record<string, unknown> }) => void,
+    ) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
         data: { type: string; runtimeId: string; payload: Record<string, unknown> },

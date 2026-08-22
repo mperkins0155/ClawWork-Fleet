@@ -513,7 +513,10 @@ export interface ClawWorkAPI {
   fleetSendMessage: (params: { recipient: string; body: string; channel?: string }) => Promise<IpcResult>;
   fleetMessagesHistory: (limit?: number) => Promise<IpcResult>;
   fleetListInfraHosts: () => Promise<IpcResult>;
+  fleetAddInfraHost: (params: { hostId: string; label: string; systemdUnits?: string[] }) => Promise<IpcResult>;
+  fleetRemoveInfraHost: (hostId: string) => Promise<IpcResult>;
   fleetInfraSnapshot: (hostId: string) => Promise<IpcResult>;
+  onFleetInfraSnapshot: (callback: (snapshot: Record<string, unknown>) => void) => () => void;
   onFleetEvent: (
     callback: (event: { type: string; runtimeId: string; payload: Record<string, unknown> }) => void,
   ) => () => void;

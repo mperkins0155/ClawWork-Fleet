@@ -601,6 +601,13 @@ export default function LeftNav() {
             className={navActiveClass(mainView === 'dashboard')}
           />
           <IconButton
+            icon={Radio}
+            tooltip={t('fleet.title', 'Fleet Room')}
+            onClick={() => setMainView('fleet')}
+            tooltipSide="top"
+            className={navActiveClass(mainView === 'fleet')}
+          />
+          <IconButton
             icon={Settings}
             tooltip={hasUpdate ? t('leftNav.updateAvailable') : t('leftNav.appSettings')}
             onClick={() => setSettingsOpen(true)}

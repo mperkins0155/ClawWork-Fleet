@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Radio, Send, Plus, Trash2 } from 'lucide-react';
+import { Radio, Send, Plus, Trash2, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useFleetStore } from '@/stores/fleetStore';
 import WindowTitlebar from '@/components/semantic/WindowTitlebar';
@@ -14,8 +14,19 @@ import EmptyState from '@/components/semantic/EmptyState';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import InfraMonitor from './InfraMonitor';
 
-function AgentPill({ online, name, emoji, runtimeLabel }: { online: boolean; name: string; emoji?: string; runtimeLabel: string }) {
+function AgentPill({
+  online,
+  name,
+  emoji,
+  runtimeLabel,
+}: {
+  online: boolean;
+  name: string;
+  emoji?: string;
+  runtimeLabel: string;
+}) {
   return (
     <div
       className={cn(
@@ -36,7 +47,12 @@ function AgentPill({ online, name, emoji, runtimeLabel }: { online: boolean; nam
 function MessageRow({ msg }: { msg: ReturnType<typeof useFleetStore.getState>['messages'][number] }) {
   const label = msg.fromUser ? 'You' : msg.sender;
   return (
-    <div className={cn('flex flex-col gap-0.5 px-4 py-2 rounded-lg', msg.fromUser ? 'bg-[var(--accent)]/10 self-end' : 'bg-[var(--bg-secondary)]')}>
+    <div
+      className={cn(
+        'flex flex-col gap-0.5 px-4 py-2 rounded-lg',
+        msg.fromUser ? 'bg-[var(--accent)]/10 self-end' : 'bg-[var(--bg-secondary)]',
+      )}
+    >
       <div className="flex items-center gap-2 type-caption text-[var(--text-muted)]">
         <span className="font-medium text-[var(--text-primary)]">{label}</span>
         <span>→</span>
@@ -63,6 +79,7 @@ export default function FleetPanel() {
   const [recipient, setRecipient] = useState('all');
   const [draft, setDraft] = useState('');
   const [addingRuntime, setAddingRuntime] = useState(false);
+  const [infraOpen, setInfraOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -108,84 +125,125 @@ export default function FleetPanel() {
           </div>
         }
         right={
-          <Button size="icon-sm" variant="ghost" onClick={handleAddRuntime} disabled={addingRuntime} aria-label={t('fleet.addRuntime', 'Add runtime')}>
-            <Plus size={16} />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={handleAddRuntime}
+              disabled={addingRuntime}
+              aria-label={t('fleet.addRuntime', 'Add runtime')}
+            >
+              <Plus size={16} />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setInfraOpen((v) => !v)}
+              aria-label={t('fleet.toggleInfra', 'Toggle infrastructure panel')}
+            >
+              {infraOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </Button>
+          </div>
         }
       />
 
-      {runtimes.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] overflow-x-auto">
-          {runtimes.map((r) => (
-            <div key={r.runtimeId} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-secondary)] type-caption">
-              <span>{r.label}</span>
-              <button onClick={() => removeRuntime(r.runtimeId)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
-                <Trash2 size={12} />
-              </button>
+      <div className="flex flex-1 min-h-0">
+        <div className="flex flex-col flex-1 min-w-0">
+          {runtimes.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--border)] overflow-x-auto">
+              {runtimes.map((r) => (
+                <div
+                  key={r.runtimeId}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--bg-secondary)] type-caption"
+                >
+                  <span>{r.label}</span>
+                  <button
+                    onClick={() => removeRuntime(r.runtimeId)}
+                    className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-
-      {agents.length > 0 && (
-        <div className="flex items-center gap-2 px-4 py-3 flex-wrap border-b border-[var(--border)]">
-          {agents.map((a) => (
-            <AgentPill key={`${a.runtimeId}:${a.id}`} online={a.online} name={a.name} emoji={a.emoji} runtimeLabel={a.runtimeLabel} />
-          ))}
-        </div>
-      )}
-
-      <ScrollArea className="flex-1 min-h-0" viewportRef={scrollRef}>
-        <div className="flex flex-col gap-2 p-4">
-          {messages.length === 0 && !loading ? (
-            <EmptyState
-              icon={<Radio size={24} className="text-[var(--text-muted)]" />}
-              title={t('fleet.empty', 'No fleet connected yet')}
-              description={t('fleet.emptyDesc', 'Add a runtime (AgentNet, SwarmClaw, TinyAGI, Hermes) to talk to your agents from one place.')}
-              action={
-                <Button size="sm" onClick={handleAddRuntime}>
-                  {t('fleet.addRuntime', 'Add runtime')}
-                </Button>
-              }
-            />
-          ) : (
-            messages.map((m) => <MessageRow key={m.id} msg={m} />)
           )}
+
+          {agents.length > 0 && (
+            <div className="flex items-center gap-2 px-4 py-3 flex-wrap border-b border-[var(--border)]">
+              {agents.map((a) => (
+                <AgentPill
+                  key={`${a.runtimeId}:${a.id}`}
+                  online={a.online}
+                  name={a.name}
+                  emoji={a.emoji}
+                  runtimeLabel={a.runtimeLabel}
+                />
+              ))}
+            </div>
+          )}
+
+          <ScrollArea className="flex-1 min-h-0" viewportRef={scrollRef}>
+            <div className="flex flex-col gap-2 p-4">
+              {messages.length === 0 && !loading ? (
+                <EmptyState
+                  icon={<Radio size={24} className="text-[var(--text-muted)]" />}
+                  title={t('fleet.empty', 'No fleet connected yet')}
+                  description={t(
+                    'fleet.emptyDesc',
+                    'Add a runtime (AgentNet, SwarmClaw, TinyAGI, Hermes) to talk to your agents from one place.',
+                  )}
+                  action={
+                    <Button size="sm" onClick={handleAddRuntime}>
+                      {t('fleet.addRuntime', 'Add runtime')}
+                    </Button>
+                  }
+                />
+              ) : (
+                messages.map((m) => <MessageRow key={m.id} msg={m} />)
+              )}
+            </div>
+          </ScrollArea>
+
+          {error && <div className="px-4 py-2 text-sm text-red-500 border-t border-[var(--border)]">{error}</div>}
+
+          <div className="flex items-center gap-2 p-3 border-t border-[var(--border)]">
+            <select
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              className="h-[var(--density-control-height-sm)] rounded-md bg-[var(--bg-primary)] border border-[var(--border)] px-2 type-body"
+            >
+              <option value="all">{t('fleet.all', 'All agents')}</option>
+              {agents.map((a) => (
+                <option key={`${a.runtimeId}:${a.id}`} value={a.id}>
+                  {a.emoji ? `${a.emoji} ` : ''}
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={t('fleet.placeholder', 'Message the fleet…')}
+              className="flex-1 h-[var(--density-control-height-sm)] rounded-md bg-[var(--bg-primary)] border border-[var(--border)] px-3 type-body glow-focus focus:border-transparent"
+            />
+            <Button size="icon-sm" onClick={handleSend} disabled={!draft.trim()} aria-label={t('fleet.send', 'Send')}>
+              <Send size={16} />
+            </Button>
+          </div>
         </div>
-      </ScrollArea>
 
-      {error && <div className="px-4 py-2 text-sm text-red-500 border-t border-[var(--border)]">{error}</div>}
-
-      <div className="flex items-center gap-2 p-3 border-t border-[var(--border)]">
-        <select
-          value={recipient}
-          onChange={(e) => setRecipient(e.target.value)}
-          className="h-[var(--density-control-height-sm)] rounded-md bg-[var(--bg-primary)] border border-[var(--border)] px-2 type-body"
-        >
-          <option value="all">{t('fleet.all', 'All agents')}</option>
-          {agents.map((a) => (
-            <option key={`${a.runtimeId}:${a.id}`} value={a.id}>
-              {a.emoji ? `${a.emoji} ` : ''}
-              {a.name}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder={t('fleet.placeholder', 'Message the fleet…')}
-          className="flex-1 h-[var(--density-control-height-sm)] rounded-md bg-[var(--bg-primary)] border border-[var(--border)] px-3 type-body glow-focus focus:border-transparent"
-        />
-        <Button size="icon-sm" onClick={handleSend} disabled={!draft.trim()} aria-label={t('fleet.send', 'Send')}>
-          <Send size={16} />
-        </Button>
+        {infraOpen && (
+          <div className="w-[22rem] flex-shrink-0 border-l border-[var(--border)] overflow-y-auto p-3">
+            <InfraMonitor />
+          </div>
+        )}
       </div>
     </div>
   );
