@@ -39,6 +39,7 @@ import FileBrowser from '../FileBrowser';
 import CronPanel from '@/layouts/CronPanel';
 import TeamsPanel from '@/layouts/TeamsPanel';
 import Dashboard from '@/layouts/Dashboard';
+import FleetPanel from '@/layouts/FleetPanel';
 import { useUsageStore } from '@/stores/usageStore';
 import DataTable, { type DataTableColumn } from '@/components/data-display/DataTable';
 import EmptyState from '@/components/semantic/EmptyState';
@@ -837,6 +838,10 @@ export default function MainArea({ onTogglePanel }: MainAreaProps) {
       ) : mainView === 'dashboard' ? (
         <div className="flex-1 min-h-0">
           <Dashboard />
+        </div>
+      ) : mainView === 'fleet' ? (
+        <div className="flex-1 min-h-0">
+          <FleetPanel />
         </div>
       ) : (
         <div key={`chat-${activeTaskId ?? 'welcome'}`} className="relative flex flex-col flex-1 min-h-0">

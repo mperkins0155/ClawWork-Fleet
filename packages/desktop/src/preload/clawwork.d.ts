@@ -498,6 +498,26 @@ export interface ClawWorkAPI {
 
   getDeviceId: () => Promise<string>;
 
+  // --- Fleet extension (Cobalt Super Hub) ---
+  // See docs/SUPER_DASHBOARD_PLAN.md (cobalt-fleet repo) for design rationale.
+  fleetListRuntimes: () => Promise<IpcResult>;
+  fleetAddRuntime: (params: {
+    runtimeId: string;
+    kind: string;
+    label: string;
+    baseUrl: string;
+    apiKey?: string;
+  }) => Promise<IpcResult>;
+  fleetRemoveRuntime: (runtimeId: string) => Promise<IpcResult>;
+  fleetListAgents: () => Promise<IpcResult>;
+  fleetSendMessage: (params: { recipient: string; body: string; channel?: string }) => Promise<IpcResult>;
+  fleetMessagesHistory: (limit?: number) => Promise<IpcResult>;
+  fleetListInfraHosts: () => Promise<IpcResult>;
+  fleetInfraSnapshot: (hostId: string) => Promise<IpcResult>;
+  onFleetEvent: (
+    callback: (event: { type: string; runtimeId: string; payload: Record<string, unknown> }) => void,
+  ) => () => void;
+
   selectContextFolder: () => Promise<IpcResult>;
   listContextFiles: (folders: string[], query?: string) => Promise<IpcResult>;
   readContextFile: (absolutePath: string, folders: string[]) => Promise<IpcResult>;

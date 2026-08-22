@@ -377,6 +377,29 @@ function buildApi(): ClawWorkAPI {
       };
     },
 
+    // --- Fleet extension (Cobalt Super Hub) ---
+    // See docs/SUPER_DASHBOARD_PLAN.md (cobalt-fleet repo) for design rationale.
+    fleetListRuntimes: () => ipcRenderer.invoke('fleet:runtimes-list'),
+    fleetAddRuntime: (params: { runtimeId: string; kind: string; label: string; baseUrl: string; apiKey?: string }) =>
+      ipcRenderer.invoke('fleet:runtime-add', params),
+    fleetRemoveRuntime: (runtimeId: string) => ipcRenderer.invoke('fleet:runtime-remove', { runtimeId }),
+    fleetListAgents: () => ipcRenderer.invoke('fleet:agents-list'),
+    fleetSendMessage: (params: { recipient: string; body: string; channel?: string }) =>
+      ipcRenderer.invoke('fleet:send-message', params),
+    fleetMessagesHistory: (limit?: number) => ipcRenderer.invoke('fleet:messages-history', { limit }),
+    fleetListInfraHosts: () => ipcRenderer.invoke('fleet:infra-hosts-list'),
+    fleetInfraSnapshot: (hostId: string) => ipcRenderer.invoke('fleet:infra-snapshot', { hostId }),
+    onFleetEvent: (callback: (event: { type: string; runtimeId: string; payload: Record<string, unknown> }) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        data: { type: string; runtimeId: string; payload: Record<string, unknown> },
+      ): void => callback(data);
+      ipcRenderer.on('fleet:event', listener);
+      return () => {
+        ipcRenderer.removeListener('fleet:event', listener);
+      };
+    },
+
     sendNotification: (params: { title: string; body: string; taskId?: string }) =>
       ipcRenderer.invoke('notification:send', params),
     onNotificationNavigateTask: (callback: (taskId: string) => void) => {

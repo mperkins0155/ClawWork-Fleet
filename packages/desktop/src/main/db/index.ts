@@ -186,6 +186,44 @@ function openDatabaseAt(workspacePath: string): void {
 
   migrateAddColumn(sqlite, "ALTER TABLE team_agents ADD COLUMN skills_json TEXT DEFAULT '[]'");
 
+  // --- Fleet extension (Cobalt Super Hub) ---
+  // See docs/SUPER_DASHBOARD_PLAN.md (cobalt-fleet repo) for design rationale.
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS fleet_messages (
+      id TEXT PRIMARY KEY,
+      runtime_id TEXT NOT NULL,
+      sender TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      channel TEXT,
+      body TEXT NOT NULL,
+      from_user INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )
+  `);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS fleet_messages_created ON fleet_messages(created_at)`);
+  sqlite.exec(`CREATE INDEX IF NOT EXISTS fleet_messages_runtime ON fleet_messages(runtime_id)`);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS fleet_runtimes (
+      runtime_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL,
+      base_url TEXT NOT NULL DEFAULT '',
+      api_key_encrypted TEXT DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS infra_hosts (
+      host_id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      systemd_units_json TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    )
+  `);
+
   initFTS(sqlite);
 
   db = drizzle(sqlite, { schema });

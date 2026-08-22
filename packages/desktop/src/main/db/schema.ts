@@ -82,6 +82,37 @@ export const teamAgents = sqliteTable(
   (table) => [primaryKey({ columns: [table.teamId, table.agentId] })],
 );
 
+// --- Fleet extension (Cobalt Super Hub) ---
+// See docs/SUPER_DASHBOARD_PLAN.md (cobalt-fleet repo) for design rationale.
+
+export const fleetMessages = sqliteTable('fleet_messages', {
+  id: text('id').primaryKey(),
+  runtimeId: text('runtime_id').notNull(),
+  sender: text('sender').notNull(),
+  recipient: text('recipient').notNull(),
+  channel: text('channel'),
+  body: text('body').notNull(),
+  fromUser: integer('from_user', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+});
+
+export const fleetRuntimes = sqliteTable('fleet_runtimes', {
+  runtimeId: text('runtime_id').primaryKey(),
+  kind: text('kind').notNull(),
+  label: text('label').notNull(),
+  baseUrl: text('base_url').notNull().default(''),
+  apiKeyEncrypted: text('api_key_encrypted').default(''),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('created_at').notNull(),
+});
+
+export const infraHosts = sqliteTable('infra_hosts', {
+  hostId: text('host_id').primaryKey(),
+  label: text('label').notNull(),
+  systemdUnitsJson: text('systemd_units_json').notNull().default('[]'),
+  createdAt: text('created_at').notNull(),
+});
+
 export const artifacts = sqliteTable('artifacts', {
   id: text('id').primaryKey(),
   taskId: text('task_id')

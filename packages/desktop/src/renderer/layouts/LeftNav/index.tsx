@@ -20,6 +20,7 @@ import {
   Clock,
   Users,
   Gauge,
+  Radio,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTaskStore } from '@/stores/taskStore';
@@ -458,6 +459,12 @@ export default function LeftNav() {
             tooltip={t('leftNav.dashboard')}
             onClick={() => setMainView('dashboard')}
             className={navActiveClass(mainView === 'dashboard')}
+          />
+          <IconButton
+            icon={Radio}
+            tooltip={t('fleet.title', 'Fleet Room')}
+            onClick={() => setMainView('fleet')}
+            className={navActiveClass(mainView === 'fleet')}
           />
           <IconButton
             icon={Settings}
