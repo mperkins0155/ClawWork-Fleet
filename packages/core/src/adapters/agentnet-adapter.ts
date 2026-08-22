@@ -1,15 +1,25 @@
 /**
  * AgentNet runtime adapter — first concrete RuntimeAdapterPort implementation.
  *
- * Talks to Mike's AgentNet Hub (Flask app, source at
+ * Talks to Mike's AgentNet Hub (Flask/FastAPI app, source at
  * docs/dashboard-references/agentnet-hub-source/app.py in cobalt-fleet repo),
  * a fleet message bus with name-addressed ('to: agent'), broadcast
  * ('to: all'), and channel ('channel: x') messaging plus an agent registry.
  *
- * Chosen as the first adapter because: (1) it's Mike's own Flask app, so the
- * API surface is fully known and stable, (2) its addressing model
- * (agent / all / channel) is exactly the UX Mike asked for and maps cleanly
- * onto RuntimeAdapterPort without translation loss.
+ * Verified against the live instance (vps-ovh:8788) on 2026-08-22. Real API
+ * contract (differs from an earlier draft of this file):
+ *   GET  /agents               -> [{name, last_seen, online}]  (X-API-Key)
+ *   GET  /messages?since=N&channel=&wait=&limit= -> {messages:[...], cursor:N}
+ *     each message: {id, sender, to, channel, subject, body, created_at}
+ *   POST /messages {to, channel, subject, body} -> {id, status}
+ *   POST /messages/{id}/ack
+ *   GET  /feed?since=&limit= -> {messages:[...]}  (all messages, admin-ish view)
+ *   GET  /  -> {service, agents, messages, uptime_sec}  (no auth; health/root)
+ *
+ * `wait` on GET /messages is a server-side long-poll (seconds); NOT used for
+ * the interval-poll fallback below since a fixed polling interval already
+ * satisfies the "no client hot-loop" goal, and long-poll would tie up a
+ * connection per adapter for no real benefit at this fleet scale.
  */
 
 import type {
@@ -27,34 +37,51 @@ export interface AgentNetAdapterConfig {
   baseUrl: string;
   /** X-API-Key for this adapter's own agent identity on the AgentNet bus. */
   apiKey: string;
-  /** Polling interval for message/agent-status fallback when no push channel is available. */
+  /** Polling interval for message/agent-status fallback. */
   pollIntervalMs?: number;
 }
 
 interface AgentNetAgentRow {
   name: string;
   last_seen: number | null;
+  online: boolean;
 }
 
 interface AgentNetMessageRow {
   id: number;
   sender: string;
-  recipient: string;
+  to: string;
   channel: string | null;
+  subject: string | null;
   body: string;
   created_at: number;
 }
 
+interface AgentNetInboxResponse {
+  messages: AgentNetMessageRow[];
+  cursor: number;
+}
+
 const DEFAULT_POLL_MS = 4000;
-/** Agent considered offline if no heartbeat within this window. */
-const ONLINE_WINDOW_MS = 90_000;
+
+function toRuntimeMessage(m: AgentNetMessageRow, runtimeId: string): RuntimeMessage {
+  return {
+    id: String(m.id),
+    runtimeId,
+    sender: m.sender,
+    recipient: m.channel ? `channel:${m.channel}` : m.to,
+    channel: m.channel ?? undefined,
+    body: m.body,
+    createdAt: new Date(m.created_at * 1000).toISOString(),
+  };
+}
 
 export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAdapterPort {
   const { runtimeId, label, baseUrl, apiKey } = config;
   const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_MS;
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let lastMessageId = 0;
+  let cursor = 0;
   const listeners = new Set<(event: RuntimeEvent) => void>();
 
   async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -67,7 +94,8 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
       },
     });
     if (!res.ok) {
-      throw new Error(`AgentNet ${path} -> HTTP ${res.status}`);
+      const bodyText = await res.text().catch(() => '');
+      throw new Error(`AgentNet ${path} -> HTTP ${res.status}${bodyText ? `: ${bodyText}` : ''}`);
     }
     return (await res.json()) as T;
   }
@@ -84,23 +112,15 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
 
   async function pollOnce() {
     try {
-      const msgs = await apiFetch<AgentNetMessageRow[]>(`/messages?since_id=${lastMessageId}`);
-      for (const m of msgs) {
-        if (m.id <= lastMessageId) continue;
-        lastMessageId = m.id;
+      const res = await apiFetch<AgentNetInboxResponse>(`/messages?since=${cursor}&limit=100`);
+      for (const m of res.messages) {
         emit({
           type: 'message',
           runtimeId,
-          payload: {
-            id: String(m.id),
-            runtimeId,
-            sender: m.sender,
-            recipient: m.channel ? `channel:${m.channel}` : m.recipient,
-            body: m.body,
-            createdAt: new Date(m.created_at * 1000).toISOString(),
-          } satisfies RuntimeMessage as unknown as Record<string, unknown>,
+          payload: toRuntimeMessage(m, runtimeId) as unknown as Record<string, unknown>,
         });
       }
+      cursor = res.cursor;
     } catch (err) {
       console.warn(`[agentnet-adapter:${runtimeId}] poll failed`, err);
     }
@@ -113,14 +133,14 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
 
     async connect() {
       try {
-        await apiFetch('/health').catch(() => undefined); // best-effort; AgentNet may not expose /health
-        // Seed lastMessageId so we don't replay entire history on connect.
-        try {
-          const recent = await apiFetch<AgentNetMessageRow[]>('/messages?limit=1');
-          lastMessageId = recent.length > 0 ? Math.max(...recent.map((m) => m.id)) : 0;
-        } catch {
-          lastMessageId = 0;
-        }
+        // Root endpoint is unauthenticated and confirms the service is up.
+        await fetch(`${baseUrl}/`).then((r) => {
+          if (!r.ok) throw new Error(`root check failed: HTTP ${r.status}`);
+        });
+        // Seed cursor at "now" so we don't replay entire history on connect.
+        // Server caps limit at 500 (FastAPI Query le=500).
+        const seed = await apiFetch<AgentNetInboxResponse>('/messages?since=0&limit=500');
+        cursor = seed.cursor;
         pollTimer = setInterval(pollOnce, pollIntervalMs);
         return { ok: true };
       } catch (err) {
@@ -138,11 +158,10 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
 
     async listAgents(): Promise<RuntimeAgentRef[]> {
       const rows = await apiFetch<AgentNetAgentRow[]>('/agents');
-      const now = Date.now() / 1000;
       return rows.map((a) => ({
         id: a.name,
         name: a.name,
-        online: a.last_seen != null && now - a.last_seen < ONLINE_WINDOW_MS / 1000,
+        online: a.online,
         lastSeenAt: a.last_seen != null ? new Date(a.last_seen * 1000).toISOString() : undefined,
       }));
     },
@@ -152,8 +171,8 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
         await apiFetch('/messages', {
           method: 'POST',
           body: JSON.stringify({
-            recipient: params.channel ? undefined : params.recipient,
-            channel: params.channel,
+            to: params.channel ? 'all' : params.recipient,
+            channel: params.channel ?? null,
             body: params.body,
           }),
         });
@@ -165,21 +184,15 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
 
     async fetchMessages(opts) {
       const params = new URLSearchParams();
-      if (opts?.recipient) params.set('recipient', opts.recipient);
+      params.set('since', '0');
       if (opts?.channel) params.set('channel', opts.channel);
       if (opts?.limit) params.set('limit', String(opts.limit));
-      const rows = await apiFetch<AgentNetMessageRow[]>(`/messages?${params.toString()}`);
-      return rows.map(
-        (m): RuntimeMessage => ({
-          id: String(m.id),
-          runtimeId,
-          sender: m.sender,
-          recipient: m.channel ? `channel:${m.channel}` : m.recipient,
-          channel: m.channel ?? undefined,
-          body: m.body,
-          createdAt: new Date(m.created_at * 1000).toISOString(),
-        }),
-      );
+      const res = await apiFetch<AgentNetInboxResponse>(`/messages?${params.toString()}`);
+      let messages = res.messages;
+      if (opts?.recipient && opts.recipient !== 'all' && !opts.channel) {
+        messages = messages.filter((m) => m.to === opts.recipient || m.to === 'all');
+      }
+      return messages.map((m) => toRuntimeMessage(m, runtimeId));
     },
 
     onEvent(callback) {
@@ -190,7 +203,9 @@ export function createAgentNetAdapter(config: AgentNetAdapterConfig): RuntimeAda
     async healthCheck() {
       const start = Date.now();
       try {
-        await apiFetch('/agents');
+        await fetch(`${baseUrl}/`).then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        });
         return { ok: true, latencyMs: Date.now() - start };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
