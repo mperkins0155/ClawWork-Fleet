@@ -258,10 +258,24 @@ export function createSwarmClawAdapter(config: SwarmClawAdapterConfig): RuntimeA
         } else {
           chatroomId = await ensureDirectChatroom(params.recipient);
         }
-        await apiFetch(`/api/chatrooms/${chatroomId}/chat`, {
+        // The /chat endpoint streams a Server-Sent-Events response (agent
+        // reply tokens), not a single JSON body -- apiFetch()'s res.json()
+        // fails on SSE ("data: {...}\n\n" is not valid JSON). We only need
+        // the send to succeed server-side; the reply itself arrives via the
+        // normal poll loop reading the chatroom's messages[] once persisted.
+        // Fire the raw fetch directly instead of going through apiFetch().
+        const res = await fetch(`${baseUrl}/api/chatrooms/${chatroomId}/chat`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Access-Key': accessKey },
           body: JSON.stringify({ text: params.body, senderId: 'user' }),
         });
+        if (!res.ok) {
+          const bodyText = await res.text().catch(() => '');
+          throw new Error(`SwarmClaw chat POST -> HTTP ${res.status}${bodyText ? `: ${bodyText.slice(0, 200)}` : ''}`);
+        }
+        // Drain the stream so the connection closes cleanly; we don't need
+        // to parse it since polling picks up the persisted reply.
+        await res.body?.cancel().catch(() => undefined);
         return { ok: true };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
