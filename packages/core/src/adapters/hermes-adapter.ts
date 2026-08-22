@@ -3,20 +3,28 @@
  * Agent instance (Nous Research), via its OpenAI-compatible API server
  * (gateway/platforms/api_server.py, default port 8642).
  *
- * Hermes is fundamentally a single-agent-per-gateway runtime (one Hermes
- * process = one agent identity), not a multi-agent bus like AgentNet/
- * SwarmClaw/TinyAGI. So the "agent roster" this adapter exposes has exactly
- * one entry per configured Hermes instance, and "sendMessage" always talks
- * to that one agent via a persisted session:
+ * Verified against a live instance (vps-ovh:8642) on 2026-08-22. Real API
+ * contract (differs from an earlier draft of this file — Hermes wraps every
+ * list/object response OpenAI-SDK-style, never returns a bare array):
+ *   Auth: Authorization: Bearer <API_SERVER_KEY>  (config: ~/.hermes/config.yaml
+ *     api_server.extra.key — confirmed correct in the original draft)
+ *   GET  /health              -> {status, platform, version}  (no auth)
+ *   GET  /health/detailed     -> rich status, auth required
+ *   GET  /api/sessions        -> {object:'list', data:[SessionSummary...]}
+ *   POST /api/sessions {session_id} -> {object:'hermes.session', session:{...}}
+ *   GET  /api/sessions/{id}   -> 404 {error:{code:'session_not_found'}} if absent
+ *   GET  /api/sessions/{id}/messages -> {object:'list', session_id, data:[...]}
+ *   POST /api/sessions/{id}/chat {message} -> chat with a persisted session
+ *     (SSE-streaming variant at .../chat/stream also exists; not used here —
+ *     we poll for new messages instead of holding a stream connection open,
+ *     to keep this adapter's transport model consistent with the others)
  *
- *   POST /api/sessions/{session_id}/chat  — chat with a persisted session
- *   GET  /api/sessions/{session_id}/messages — session history
- *   GET  /health                           — liveness
- *
- * `recipient`/`channel` are accepted for interface compatibility but only
- * meaningfully affect routing when multiple Hermes instances are registered
- * as separate adapters (one per instance) — e.g. runtimeId "hermes-vps" vs
- * "hermes-laptop" — which is the intended multi-instance setup.
+ * Hermes is fundamentally single-agent-per-gateway (one Hermes process = one
+ * agent identity), not a multi-agent bus like AgentNet/SwarmClaw/TinyAGI. So
+ * the "agent roster" this adapter exposes has exactly one entry per
+ * configured Hermes instance. Register one adapter per Hermes instance
+ * (e.g. runtimeId "hermes-vps", "hermes-laptop") for a true multi-instance
+ * fleet.
  */
 
 import type {
@@ -42,8 +50,13 @@ export interface HermesAdapterConfig {
 interface HermesSessionMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
-  timestamp?: string;
+  timestamp?: number | string;
   id?: string;
+}
+
+interface HermesListResponse<T> {
+  object: 'list';
+  data: T[];
 }
 
 const DEFAULT_POLL_MS = 5000;
@@ -69,7 +82,8 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
       },
     });
     if (!res.ok) {
-      throw new Error(`Hermes ${path} -> HTTP ${res.status}`);
+      const bodyText = await res.text().catch(() => '');
+      throw new Error(`Hermes ${path} -> HTTP ${res.status}${bodyText ? `: ${bodyText.slice(0, 200)}` : ''}`);
     }
     return (await res.json()) as T;
   }
@@ -84,11 +98,17 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
     }
   }
 
+  function toIso(ts: number | string | undefined): string {
+    if (ts == null) return new Date().toISOString();
+    if (typeof ts === 'number') return new Date(ts * (ts < 1e12 ? 1000 : 1)).toISOString();
+    return ts;
+  }
+
   async function ensureFleetSession(): Promise<void> {
     try {
       await apiFetch(`/api/sessions/${FLEET_SESSION_ID}`);
     } catch {
-      // Session doesn't exist yet — create it.
+      // 404 -> create it.
       await apiFetch('/api/sessions', {
         method: 'POST',
         body: JSON.stringify({ session_id: FLEET_SESSION_ID }),
@@ -96,22 +116,28 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
     }
   }
 
+  async function fetchFleetMessages(): Promise<HermesSessionMessage[]> {
+    const res = await apiFetch<HermesListResponse<HermesSessionMessage>>(`/api/sessions/${FLEET_SESSION_ID}/messages`);
+    return res.data;
+  }
+
   async function pollOnce() {
     try {
-      const messages = await apiFetch<HermesSessionMessage[]>(`/api/sessions/${FLEET_SESSION_ID}/messages`);
+      const messages = await fetchFleetMessages();
       if (messages.length > lastMessageCount) {
-        for (const m of messages.slice(lastMessageCount)) {
+        for (let i = lastMessageCount; i < messages.length; i++) {
+          const m = messages[i];
           if (m.role !== 'assistant') continue; // only surface the agent's own replies as incoming
           emit({
             type: 'message',
             runtimeId,
             payload: {
-              id: m.id ?? `${runtimeId}-${messages.indexOf(m)}`,
+              id: m.id ?? `${runtimeId}-${i}`,
               runtimeId,
               sender: agentName,
               recipient: 'all',
               body: m.content,
-              createdAt: m.timestamp ?? new Date().toISOString(),
+              createdAt: toIso(m.timestamp),
             } satisfies RuntimeMessage as unknown as Record<string, unknown>,
           });
         }
@@ -136,10 +162,14 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
 
     async connect() {
       try {
-        await apiFetch('/health');
+        // /health is unauthenticated; confirms the service is reachable
+        // before we spend an authenticated call on session setup.
+        const health = await fetch(`${baseUrl}/health`).then((r) => r.json() as Promise<{ status?: string }>);
+        if (health.status !== 'ok') throw new Error(`unexpected health status: ${health.status}`);
+
         await ensureFleetSession();
         try {
-          const history = await apiFetch<HermesSessionMessage[]>(`/api/sessions/${FLEET_SESSION_ID}/messages`);
+          const history = await fetchFleetMessages();
           lastMessageCount = history.length;
         } catch {
           lastMessageCount = 0;
@@ -185,17 +215,16 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
     },
 
     async fetchMessages(opts) {
-      const messages = await apiFetch<HermesSessionMessage[]>(
-        `/api/sessions/${FLEET_SESSION_ID}/messages${opts?.limit ? `?limit=${opts.limit}` : ''}`,
-      );
-      return messages.map(
+      const messages = await fetchFleetMessages();
+      const limited = opts?.limit ? messages.slice(-opts.limit) : messages;
+      return limited.map(
         (m, i): RuntimeMessage => ({
           id: m.id ?? `${runtimeId}-${i}`,
           runtimeId,
           sender: m.role === 'user' ? 'user' : agentName,
           recipient: 'all',
           body: m.content,
-          createdAt: m.timestamp ?? new Date().toISOString(),
+          createdAt: toIso(m.timestamp),
         }),
       );
     },
@@ -208,7 +237,8 @@ export function createHermesAdapter(config: HermesAdapterConfig): RuntimeAdapter
     async healthCheck() {
       const start = Date.now();
       try {
-        await apiFetch('/health');
+        const res = await fetch(`${baseUrl}/health`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return { ok: true, latencyMs: Date.now() - start };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };
