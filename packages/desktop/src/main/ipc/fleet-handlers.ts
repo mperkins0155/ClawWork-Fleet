@@ -12,6 +12,13 @@ import { getDb, isDbReady } from '../db/index.js';
 import { fleetMessages, fleetRuntimes, infraHosts } from '../db/schema.js';
 import { createAgentNetAdapter } from '@clawwork/core';
 import type { RuntimeAdapterPort, FleetMessage } from '@clawwork/core';
+import {
+  registerHost as registerInfraHost,
+  unregisterHost as unregisterInfraHost,
+  getSnapshotOnce,
+  onSnapshot,
+  listMonitoredHosts,
+} from '../infra/collector.js';
 
 function ipcError(err: unknown): { ok: false; error: string } {
   return { ok: false, error: err instanceof Error ? err.message : 'unknown' };
@@ -218,13 +225,79 @@ export function registerFleetHandlers(): void {
     }
   });
 
-  // NOTE: infra snapshot polling (docker/tailscale/systemd) is Phase 2 —
-  // handlers registered here for the wiring shape; actual collector
-  // implementation (packages/desktop/src/main/infra/collector.ts) lands
-  // in the next scaffolding pass.
-  ipcMain.handle('fleet:infra-snapshot', async (_event, _params: { hostId: string }) => {
-    return { ok: true, result: null };
+  ipcMain.handle(
+    'fleet:infra-host-add',
+    (_event, params: { hostId: string; label: string; systemdUnits?: string[] }) => {
+      if (!isDbReady()) return ipcError(new Error('database not ready'));
+      try {
+        getDb()
+          .insert(infraHosts)
+          .values({
+            hostId: params.hostId,
+            label: params.label,
+            systemdUnitsJson: JSON.stringify(params.systemdUnits ?? []),
+            createdAt: new Date().toISOString(),
+          })
+          .run();
+        registerInfraHost(params.hostId, params.label, params.systemdUnits ?? []);
+        return { ok: true };
+      } catch (err) {
+        return ipcError(err);
+      }
+    },
+  );
+
+  ipcMain.handle('fleet:infra-host-remove', (_event, params: { hostId: string }) => {
+    if (!isDbReady()) return ipcError(new Error('database not ready'));
+    try {
+      unregisterInfraHost(params.hostId);
+      getDb().delete(infraHosts).where(eq(infraHosts.hostId, params.hostId)).run();
+      return { ok: true };
+    } catch (err) {
+      return ipcError(err);
+    }
   });
+
+  ipcMain.handle('fleet:infra-snapshot', async (_event, params: { hostId: string }) => {
+    try {
+      const snapshot = await getSnapshotOnce(params.hostId);
+      return { ok: true, result: snapshot };
+    } catch (err) {
+      return ipcError(err);
+    }
+  });
+
+  // Live push: any registered host's snapshot changes get broadcast to every
+  // renderer window on the 'fleet:infra-snapshot' channel. Renderer subscribes
+  // once via onFleetInfraSnapshot(), never polls.
+  onSnapshot((snapshot) => {
+    broadcastToRenderer('fleet:infra-snapshot', snapshot);
+  });
+}
+
+/** Called on app start to re-register infra hosts persisted from a previous session. */
+export function initInfraHosts(): void {
+  if (!isDbReady()) return;
+  try {
+    const rows = getDb().select().from(infraHosts).all();
+    for (const row of rows) {
+      let units: string[] = [];
+      try {
+        units = JSON.parse(row.systemdUnitsJson) as string[];
+      } catch {
+        units = [];
+      }
+      registerInfraHost(row.hostId, row.label, units);
+    }
+    if (rows.length === 0 && listMonitoredHosts().length === 0) {
+      // No hosts configured yet — register localhost (the machine running
+      // ClawWork itself) as a sensible zero-config default so the Fleet
+      // panel isn't empty on first launch.
+      registerInfraHost('local', 'This machine', []);
+    }
+  } catch (err) {
+    console.warn('[fleet-handlers] initInfraHosts failed:', err);
+  }
 }
 
 /** Called on app quit to cleanly tear down live adapter connections. */

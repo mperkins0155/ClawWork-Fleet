@@ -23,7 +23,8 @@ import { registerContextHandlers } from './ipc/context-handlers.js';
 import { registerNotificationHandlers } from './ipc/notification-handlers.js';
 import { registerAvatarHandlers, registerAvatarProtocol } from './ipc/avatar-handlers.js';
 import { registerHubHandlers } from './ipc/hub-handlers.js';
-import { registerFleetHandlers, initFleetAdapters, shutdownFleetAdapters } from './ipc/fleet-handlers.js';
+import { registerFleetHandlers, initFleetAdapters, shutdownFleetAdapters, initInfraHosts } from './ipc/fleet-handlers.js';
+import { shutdownCollector } from './infra/collector.js';
 import { unwatchAll } from './context/file-watcher.js';
 import { isInstallingUpdate } from './auto-updater.js';
 import { initTray, destroyTray } from './tray.js';
@@ -224,6 +225,8 @@ if (!gotLock) {
     registerAvatarProtocol();
     registerHubHandlers();
     registerFleetHandlers();
+    initInfraHosts();
+    initFleetAdapters().catch((err) => console.warn('[app] initFleetAdapters failed:', err));
 
     ipcMain.handle('app:rebuild-menu', () => {
       devModeEnabled = readConfig()?.devMode === true;
